@@ -1,0 +1,69 @@
+.caja {
+    height: 150px;
+    width: 150px;
+}
+
+.rojo {
+    background-color: red;
+
+}
+
+.azul {
+    background-color: blue;
+}
+
+.rosa {
+    background-color: pink;
+}
+
+.naranja {
+    background-color: orange;
+
+}
+
+.amarillo {
+    background-color: yellow;
+
+}
+.verde{
+    background-color: green;
+}
+
+.contenedor_padre {
+    background-color: bisque;
+    display: flex;
+}
+
+.header {
+    background-color: aqua;
+}
+
+.logo {
+    background-color: blueviolet;
+    display: flex;
+    justify-content: space-around;
+    align-items: center
+}
+
+.navegacion {
+    display: flex;
+    justify-content: space-between;
+}
+
+.menu {
+    background-color: cadetblue;
+    width: 80%;
+}
+
+.menu ul {
+    display: flex;
+    justify-content: space-around
+}
+
+.login {
+    background-color: coral;
+    width: 20%;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+}

@@ -1,0 +1,113 @@
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box
+
+
+}
+
+
+.box_model{ 
+
+    float: right; 
+
+    background-color: rgb(49, 196, 139); 
+
+    width: 250px; 
+
+    height: 300px; 
+
+    padding: 10px; 
+
+    margin: 20px; 
+
+  
+
+    border: groove 5px salmon; 
+
+ 
+
+} 
+
+.caja_menu{ 
+
+    float: left; 
+
+    background-color: rgb(153, 153, 19); 
+
+    width: 300px; 
+
+    height: auto; 
+
+    padding: 15px; 
+
+    border-top:solid 10px red; 
+
+    border-left:solid 7px green; 
+
+    border-bottom:solid 10px blue; 
+
+    border-right:solid 7px yellow; 
+
+} 
+
+.linea{ 
+
+    display: inline-block; 
+
+} 
+.navegador{color: aliceblue;
+    background-color: rgb(87, 165, 42);
+    background-image: url(./imagenes/encabezado.jpg);
+    background-size: cover;
+    background-position:center;
+    padding: 1rem;
+    height: 40vh;
+    }
+    .menusuperior{
+        list-style: none;
+        text-align: center;
+    }
+    .menusuperior li{display: inline-block;
+        padding: 2rem;
+    }
+    .menusuperior a{
+        text-decoration: none;
+        color: rgb(184, 100, 21);
+        font-weight: 900;
+        padding: 3rem;
+        font-size: 3rem;
+    }
+ /* contenido */
+ .contenido{
+    background-color: aqua;
+    padding: 2rem;
+    width: 70%;
+    float: left;
+
+ }
+    .contenido_imagen{
+        background-color: crimson;
+        width: 50%;
+    }
+    .contenido_imagen img{
+        width: 50%;
+        box-shadow: 5px 5px rgb(62, 187, 24);
+        border-radius: 10px;
+    }
+    /* Sugerencias */
+    .contenido_sugerencias{
+    background-color: rgb(172, 110, 223);
+    color: white;
+    width: 30%;
+    float: right;
+    border-top:solid 10px red; 
+
+    border-left:solid 7px green; 
+
+    border-bottom:solid 10px blue; 
+
+    border-right:solid 7px yellow; 
+
+
+}
