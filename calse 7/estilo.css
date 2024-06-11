@@ -1,0 +1,138 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400..700&display=swap');
+
+
+*{
+    margin: 0;
+    padding: 0;
+}
+html{
+    font-size: 10px;
+}
+
+
+body {font-family: "Dancing Script", cursive;
+    background-color: rgb(48, 177, 160);
+    color: aliceblue;
+    font-family: sans-serif;
+    margin: 20px;
+    background-image: url(./imagenes/howars.jpeg);
+    background-size: cover;
+}
+h1, h2, h3 {color: rgb(197, 111, 12);
+    text-align: center;
+}
+.resumen {
+    margin-top: 20px;
+    border: 1px solid #ccc;
+    padding: 20px;
+}
+.temas {
+    margin-top: 20px;
+    list-style: none;
+    padding: 0;
+}
+.temas li {
+    margin-bottom: 10px;
+}
+.importancia {
+    margin-top: 20px;
+}
+.recomendacion {
+    margin-top: 20px;
+    text-align: center;
+}
+.navegador{color: aliceblue;
+background-color: rgb(87, 165, 42);
+background-image: url(./imagenes/encabezado.jpg);
+background-size: cover;
+height: 500px;
+
+
+}
+.menusuperior{
+    list-style: none;
+    text-align: center;
+}
+.menusuperior li{display: inline-block;
+    padding: 2rem;
+}
+.menusuperior a{
+    text-decoration: none;
+    color: rgb(184, 100, 21);
+    font-weight: 900;
+    padding: 3rem;
+    font-size: 3rem;
+}
+.menusuperior li :active{
+    background-color: #ccc;
+
+}
+
+
+/* tipografias */
+.dancing-script- {
+    font-family: "Dancing Script", cursive;
+    font-weight: 700;
+    font-style: normal;
+    font-size: 2rem;
+  }
+.personajes{
+    background-color: cornflowerblue;
+    background-image: none;
+    font-family: "Dancing Script", cursive;
+    font-weight: 700;
+    font-style: normal;
+    font-size: 2rem;
+}
+.historia {
+    
+    color: rgb(201, 119, 26);
+    margin-top: 20px;
+    border: 1px solid #ccc;
+    padding: 20px;
+}
+
+/* Formulario */
+
+.formulario{
+    width: 80%;
+    margin: 0 auto;
+}
+.fieldset{
+    border: 1px solid #ccc;
+    padding: 2rem;
+    margin-bottom: 2rem;
+
+}
+.legend{
+    font-weight: bold;
+}
+.form_grup{
+margin-bottom: 1.2rem;
+
+}
+.label{
+    display: block;
+}
+
+.input, textarea, select{
+    width: 100%;
+}
+.input:focus{
+    background-color: aquamarine;
+}
+
+.submit-enviar{
+    padding: 1rem 2 rem;
+    background-color: rgb(118, 206, 206);
+    border: none;
+    border-radius: 0.5rem;
+    cursor: pointer;
+}
+.submit-enviar:hover{
+    background-color: rgb(3, 39, 39);
+}
+.submit-enviar:focus{
+    color: red;
+}

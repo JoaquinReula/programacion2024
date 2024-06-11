@@ -1,0 +1,2183 @@
+/* MercadoPago Checkout Render */
+/* @version 1.2.0 */
+/**
+ * MercadoPago Checkout Render
+ * 
+ * Handles and interprets checkout access on Collector's site 
+ * and renders the pay trigger with especified styles and/or behavior.
+ * 
+ * @author hcasatti
+ * @version 0.8.2
+ */
+function $MPC (){
+	$MPC.__doRender();
+}
+typeof $MPCDEV != "undefined" || ($MPCDEV = {});
+
+
+(function() {
+	var prod = (document.location.hostname !== "localhost" && document.location.hostname !== "127.0.0.1");
+	$MPCDEV = prod ? {} : $MPCDEV;
+})();
+
+// Version
+$MPC.version = "0.8.2";
+$MPC.sessionId = String(Math.ceil(Math.random()*10000000))+String(new Date().getTime());
+
+// Configurations
+$MPC.conf = {
+	protocol: document.location.protocol.indexOf ("https:") >= 0 ? "https:" : "http:",
+	quirksMode: document.compatMode == "BackCompat",
+	imageBasePath: $MPCDEV.imageBasePath || document.location.protocol + "//secure.mlstatic.com/mptools/assets/",
+	messageOrigin: ".*(" + ($MPCDEV.messageOrigin ? $MPCDEV.messageOrigin + "|": "")  + "mercadopago.com|accountrecovery.mercadolibre.com|mercadopago.cl)(.(ar|br|mx|co|ve|uy|pe))?$",
+	messagingEnabled: $MPCDEV.messagingEnabled != null ? $MPCDEV.messagingEnabled : (typeof window.postMessage != "undefined"),
+	resizeDuration: 400
+};
+
+$MPC.__temp = {};
+
+/**
+ * Execute Render (visual and behavior)
+ */
+$MPC.__doRender = function () {
+	var start = new Date().getTime();
+
+	window.mp_checkout_triggers == null && (window.mp_checkout_triggers = []);
+	
+	// Get all buttons with name "MP-payButton". If none exists, set event to run again after page load.
+	var triggers = [].concat (
+			Array.fromCollection(document.getElementsByName ("MP-payButton")),
+			Array.fromCollection(document.getElementsByName ("MP-Checkout"))
+		);
+	if (triggers.length <= 0 && window.mp_renderLoaded != true) {
+		window.mp_renderLoaded = $MPC.__event.add (window, "load", $MPC.__doRender);
+		return;
+	}
+	
+	for (var f = 0; f < triggers.length; f++) {
+		if (triggers[f].processed === true) {
+			continue;
+		}
+		
+		triggers[f].processed = false;
+		triggers[f].cssProcessed = false;
+
+		window.mp_checkout_triggers.push (triggers[f]);
+	}
+
+	// Call visual generation after process all trigger behaviors.
+	try {
+		$MPC.__doVisual ();
+	} catch (e) {
+		$MPC.__track ("ERROR", "DO_VISUAL", {"exception": e.message});
+	}
+
+	// Set trigger behavior.
+	try {
+		$MPC.__doBehavior ();
+	} catch (e) {
+		$MPC.__track ("ERROR", "DO_BEHAVIOR", {"exception": e.message});
+	}
+	
+	// Dejavu "load" tracking. Just once per page.
+	window.$MPC_executed !== true && $MPC.__track ("INFO", "LOAD");
+	
+	window.$MPC_executed = true;
+
+	// Compat
+	window.mp_buttons = window.mp_checkout_triggers;
+
+	var end = new Date().getTime();
+	$MPC.__track("TIMER", "DO_RENDER", {"elapsed": end - start});
+};
+
+/**
+ * Generate visual style for triggers
+ * 
+ * @param {Array} triggers(optional)
+ * @param {String} forcedClass(optional)
+ */
+$MPC.__doVisual = function (triggers, forcedClass) {
+	var force = false;
+	
+	window.mp_stylesLoaded == null && (window.mp_stylesLoaded = []);
+	
+	if (triggers == null) {
+		triggers = window.mp_checkout_triggers; 
+	} else {
+		if (triggers.length == null) {
+			triggers = [triggers];
+		}
+		force = true;
+	}
+	
+	for (var i = 0; i < triggers.length; i++) {
+		if (force) {
+			triggers[i].cssProcessed = false;
+			triggers[i].styleDefinition = null;
+		}
+		
+		if (triggers[i].cssProcessed) {
+			continue;
+		}
+		
+		var className = "";
+		if (force) {
+			className = forcedClass != null ? forcedClass : triggers[i].srcClassName;
+		} else {
+			className = triggers[i].className;	
+			triggers[i].srcClassName = className;
+		}
+		
+		// If trigger hasn't className, is skipped.
+		if (className == "") {
+			triggers[i].cssProcessed = true;
+			continue;
+		}
+		// If trigger className format don't match MP nomenclature, is skipped.
+		if (!/^(-?\w+)+-?$/.test (className)) {
+			triggers[i].cssProcessed = true;
+			continue;
+		}
+		
+		// Get values from className according to existing Visual Groups.
+		for (var d in $MPC.vGroups) {
+			var group = $MPC.vGroups[d]; 
+			var data = group.getData (className);
+			
+			if ($MPC.styles[d] != null && $MPC.styles[d][data] != null) {
+				if (triggers[i].styleDefinition == null) {
+					// Define Visual Groups and associate Base.Common.
+					triggers[i].styleDefinition = {
+							all: {},
+							base: {}
+						};
+							
+					triggers[i].styleDefinition.all[$MPC.styles.dflt] = "common";
+					triggers[i].styleDefinition.base[$MPC.styles.dflt] = "common";
+				}
+
+				if (triggers[i].styleDefinition[group.groupType] == null) {
+					triggers[i].styleDefinition[group.groupType] = {};
+				}
+				
+				triggers[i].styleDefinition.all[d] = data;
+				triggers[i].styleDefinition[group.groupType][d] = data;
+			}
+		}
+		
+		// Call process method according to group type (base, style, extra).
+		if (triggers[i].styleDefinition != null) {
+			// Clear original className.
+			triggers[i].className = "";
+			
+			$MPC.__processBase(triggers[i]);
+			$MPC.__processStyle(triggers[i]);
+			$MPC.__processExtra(triggers[i]);
+		}
+		else {
+			triggers[i].className = triggers[i].srcClassName;
+		}
+	
+		triggers[i].cssProcessed = true;
+	}
+};
+
+/**
+ * Process trigger Base Styles.
+ * 
+ * @param {Object} trigger
+ */
+$MPC.__processBase = function (trigger) {
+	if (trigger.styleDefinition.base == null) {
+		return;
+	}
+	var className = $MPC.__processCSS (trigger, "base");
+	trigger.className += trigger.className == "" ? className : " " + className;
+};
+
+/**
+ * Process specific trigger Styles.
+ * 
+ * @param {Object} trigger
+ */
+$MPC.__processStyle = function (trigger) {
+	if (trigger.styleDefinition.style == null) {
+		return;
+	}
+	var className = $MPC.__processCSS (trigger, "style");
+	trigger.className += trigger.className == "" ? className : " " + className;
+};
+
+/**
+ * Process extra trigger Styles and Elements (ex. Logos).
+ * 
+ * @param {Object} trigger
+ */
+$MPC.__processExtra = function (trigger) {
+	if (trigger.extraElement != null) {
+		try {
+			delete trigger.parentNode.removeChild(trigger.extraElement);
+		} catch (e) {}
+		try {
+			delete trigger.extraElement;
+		} catch (e) {}
+	}
+	if (trigger.styleDefinition.extra == null) {
+		return;
+	}
+	
+	if (trigger.extraContainer == null) {
+		trigger.extraContainer = document.createElement ("div");
+		trigger.extraContainer.style.textAlign = "center";
+		trigger.extraContainer.style.display = "inline-block";
+		
+		trigger.parentNode.replaceChild (trigger.extraContainer, trigger);
+		trigger.extraContainer.appendChild (trigger);
+	}
+	
+	trigger.extraElement = document.createElement ("span");
+	var extraClassName = $MPC.__processCSS (trigger, "extra");
+
+	trigger.extraElement.className = extraClassName;
+	if (trigger.nextSibling != null) {
+		trigger.parentNode.insertBefore (trigger.extraElement, trigger.nextSibling);
+	} else {
+		trigger.parentNode.appendChild (trigger.extraElement);
+	}
+};
+
+/**
+ * Process trigger style.
+ * Return generated class for definition type.
+ * 
+ * @param {Object} trigger
+ * @param {String} styleDefinition
+ * @return {String}
+ */
+$MPC.__processCSS = function (trigger, styleDefinition) {
+	var styleArray = [];
+	for (var i in trigger.styleDefinition[styleDefinition]) {
+		styleArray.push (trigger.styleDefinition[styleDefinition][i]);
+	}
+	var styleClassName = "MP-" + styleArray.sort().join("-");
+
+	var combinedStyle = {};
+	var finalClassName = "";
+	
+	for (var i in trigger.styleDefinition[styleDefinition]) {
+		var dependency = $MPC.styles[i][trigger.styleDefinition[styleDefinition][i]].dependency;
+		dependency = trigger.styleDefinition.all[dependency];
+		if (dependency != null) {
+			styleClassName += "-D" + dependency;
+		}
+
+		if (i != "base" && $MPC.styles[i]["common"] != null) {
+			var commonDependency = $MPC.styles[i]["common"].dependency;
+			commonDependency = trigger.styleDefinition.all[commonDependency];
+			if (commonDependency != null) {
+				styleClassName += "-CD" + commonDependency;
+			}
+
+			for (var a in $MPC.styles[i]["common"].attributes) {
+				if (combinedStyle[a] == null) {
+					combinedStyle[a] = "";
+				}
+
+				combinedStyle[a] += $MPC.styles[i]["common"].getCSS(a, commonDependency);
+			}
+		}
+		
+		for (var a in $MPC.styles[i][trigger.styleDefinition[styleDefinition][i]].attributes) {
+			if (combinedStyle[a] == null) {
+				combinedStyle[a] = "";
+			}
+
+			combinedStyle[a] += $MPC.styles[i][trigger.styleDefinition[styleDefinition][i]].getCSS (a, dependency);
+		}
+	}
+	
+	for (var a in combinedStyle) {
+		finalClassName = a == "normal" ? styleClassName : styleClassName + ":" + a;
+		if (window.mp_stylesLoaded.indexOf (finalClassName) >= 0) {
+			continue;
+		}
+
+		$MPC.__addCSS (styleDefinition, finalClassName, combinedStyle[a]);
+		window.mp_stylesLoaded.push (finalClassName);
+	}
+	
+	return styleClassName;
+};
+
+/**
+ * Generate trigger behavior.
+ * 
+ * @param {Object} trigger
+ */
+$MPC.__doBehavior = function (trigger) {
+	if (trigger == null) {
+		if (window.mp_checkout_triggers == null) {
+			return;
+		}
+		
+		for (var b = 0; b < window.mp_checkout_triggers.length; b++) {
+			$MPC.__doBehavior (window.mp_checkout_triggers[b]);
+		}
+		return;
+	}
+	
+	$MPC.__integrations == null && ($MPC.__integrations = {
+			link: [],
+			form: [],
+			iframe: []
+		});
+	if (trigger.processed === true) {
+		return;
+	}
+
+	var fireEvent = false;
+	trigger.data = {};
+
+	if (trigger.tagName.toLowerCase() == "iframe") {
+		trigger.integrationType = "IFRAME";
+		$MPC.__integrations.iframe.push (trigger);
+		$MPC.__event.add(window, "message", $MPC.__msgReceiver);
+	} else if ((trigger.tagName.toLowerCase() == "button" || trigger.tagName.toLowerCase() == "input") && trigger.type.toLowerCase() == "submit") {
+		trigger.integrationType = "FORM";
+		$MPC.__integrations.form.push (trigger);
+		/*
+		 * If form action is not a local anchor or a javascript call, set fire event.
+		 */
+		if (trigger.form != null && trigger.form.action.trim ().indexOf (trigger.form.action.trim () + "#") < 0) {
+			if (/^(javascript:)/.test (trigger.form.action.trim ())) {
+				trigger.data.js = trigger.form.action;
+			} else {
+				trigger.data.url = trigger.form.action;
+			}
+			trigger.form.onsubmit = function (){return false;};
+			fireEvent = true;
+		}
+	} else {
+		trigger.integrationType = "LINK";
+		$MPC.__integrations.link.push (trigger);
+		/*
+		 * If href url is not a local anchor or a javascript call, set fire event.
+		 */
+		if (trigger.getAttribute ("href") != null && !(new RegExp("^("+document.location.href+")?#").test (trigger.getAttribute ("href")))) {
+			if (/^(javascript:)/.test (trigger.getAttribute ("href").trim())) {
+				trigger.data.js = trigger.getAttribute ("href");
+			} else {
+				trigger.data.url = trigger.getAttribute ("href");
+			}
+			trigger.href = "javascript:void(0)";
+			fireEvent = true;
+		}
+	}
+	
+	trigger.data.size = {
+		width: trigger.getAttribute ("width") || (trigger.form ? trigger.form.getAttribute ("width") : null), 
+		height: trigger.getAttribute ("height") || (trigger.form ? trigger.form.getAttribute ("height") : null)
+	};
+	
+	var mode = trigger.getAttribute("mp-mode") || (trigger.form ? trigger.form.getAttribute ("mp-mode") || "dflt" : "dflt");
+	if (mode != null && mode.trim() != "") {
+		var modeData = mode.toLowerCase().split("-");
+		trigger.data.mode = modeData[0];
+		trigger.data.modeData = modeData[1];
+	} else {
+		trigger.data.target = trigger.getAttribute("target") || (trigger.form ? trigger.form.getAttribute("target") : null);
+	}
+	trigger.setAttribute("target", "");
+	trigger.form && trigger.form.setAttribute("target","");
+
+	var imgContent = trigger.getElementsByTagName ("img");
+	if (imgContent.length <= 0) {
+		if (fireEvent) {
+			$MPC.__event.add(trigger, "click", $MPC.fire);
+		}
+	} else {
+		for (var i = 0; i < imgContent.length; i++) {
+			imgContent[i].data = trigger.data;
+			if (fireEvent) {
+				$MPC.__event.add(imgContent[i], "click", $MPC.fire);
+			}
+		}
+	}
+	
+	/*
+	 * If exists error handler, set it to trigger instance.
+	 */
+	if (trigger.integrationType == "FORM") {
+		trigger.onerror = trigger.getAttribute ("onerror") || trigger.form.getAttribute ("onerror");
+	} else {
+		trigger.onerror = trigger.getAttribute ("onerror");
+	}
+	if (trigger.onerror && typeof window[trigger.onerror] == "function") {
+		trigger.onerror = window[trigger.onerror];
+	}
+
+	/*
+	 * If exists complete handler, set it to trigger instance.
+	 */
+	if (trigger.integrationType == "FORM") {
+		trigger.onreturn = trigger.getAttribute ("onreturn") || trigger.getAttribute ("callback") || trigger.form.getAttribute ("onreturn") || trigger.form.getAttribute ("callback");
+	} else {
+		trigger.onreturn = trigger.getAttribute ("onreturn") || trigger.getAttribute ("callback");
+	}
+	
+	/**
+	 * Button instance method to call checkout opening.
+	 * 
+	 * @param {String} url
+	 */
+	trigger.openMPCheckout = function (url) {
+		url && (this.data.url = url);
+		
+		$MPC.openCheckout (this);
+	};
+	if (trigger.integrationType == "FORM") {
+		trigger.form.mpButton = trigger;
+		trigger.form.openMPCheckout = function (url) {
+			this.mpButton.openMPCheckout (url);
+		};
+	}
+	
+	trigger.processed = true;
+};
+
+/**
+ * Fire specified checkout opening.
+ * 
+ * @param {Event} e
+ */
+$MPC.fire = function (event) {
+	if (event == null) {
+		return false;
+	}
+	
+	var trigger = event.srcElement || event.target;
+
+	try {
+		if (trigger != null && trigger.data != null) {
+			if (trigger.data.js != null && trigger.data.js.trim () != "") {
+				eval (trigger.data.js);
+			} else if (trigger.data.url != null || trigger.data.url.trim () != ""){
+				$MPC.openCheckout (trigger);
+			}
+		}
+	} catch(e) {
+		$MPC.__track("ERROR", "CLICK", {"exception": e.message, "trigger_url": trigger.data.url});
+	}
+};
+
+/**
+ * Call checkout openers depending on trigger instance opening mode.
+ * 
+ * @param {Object} trigger
+ */
+$MPC.openCheckout = function (trigger) {
+	var openData = trigger ? (trigger.data || trigger) : null;
+
+	if (openData == null || openData.url == null || openData.url.trim () == "") {
+		return;
+	}
+	trigger.data = openData;
+
+	try {
+		$MPC.__track("INFO", "OPEN_MODE", {"mode": trigger.data.mode, "trigger_url": trigger.data.url});
+
+		if (typeof $MPC.openCheckout[trigger.data.mode] == "function") {
+			$MPC.openCheckout[trigger.data.mode] (trigger);
+		} else {
+			$MPC.openCheckout.dflt (trigger);
+		}
+	} catch (e) {
+		$MPC.__track("ERROR", "OPEN", {"exception": e.message, "trigger_url": trigger.data.url});
+	}
+};
+
+/**
+ * Opening size definitions.
+ */
+$MPC.openCheckout.size = {
+		dflt: {width: 815, height: 550},
+		lite: {width: 815, height: 550}
+	};
+
+/**
+ * Return size object or default.
+ * 
+ * @param {String} size
+ */
+$MPC.openCheckout.size.get = function (size) {
+	if (size == null || $MPC.openCheckout.size[size] == null) {
+		return $MPC.openCheckout.size.dflt;
+	}
+	return $MPC.openCheckout.size[size];
+};
+
+
+/**
+ * Open Checkout Default
+ */
+$MPC.openCheckout.dflt = function (trigger) {
+	$MPC.openCheckout.modal (trigger);
+};
+
+/**
+ * Open Checkout in New Window (target).
+ */
+$MPC.openCheckout.blank = function (trigger) {
+	if (trigger.integrationType == "FORM") {
+		$MPC.checkout = window.open ("", trigger.data.target || "MercadoPago");
+
+		trigger.form.setAttribute ("target", trigger.data.target || "MercadoPago");
+		trigger.form.submit ();
+	} else {
+		$MPC.checkout = window.open (trigger.data.url, trigger.data.target || "MercadoPago");
+	}
+};
+
+/**
+ * Open Checkout as Redirect.
+ */
+$MPC.openCheckout.redirect = function (trigger) {
+	if (trigger.integrationType == "FORM") {
+		trigger.form.setAttribute ("target", "_self");
+		trigger.form.submit ();
+	} else {
+		document.location.href = trigger.data.url;
+	}
+};
+
+/**
+ * Open Checkout in PopUp.
+ */
+$MPC.openCheckout.popup = function (trigger) {
+	var size = $MPC.openCheckout.size.get (trigger.data.modeData);
+	
+	var left = (screen.width - size.width)/2;
+	var top = (screen.height - size.height)/2 - 50;
+	
+	$MPC.checkout = window.open ("", "MPCheckout", "width=" + size.width + ",height=" + size.height + ",scrollbars=1,location=0,menubar=0,resizable=1,titlebar=0,toolbar=0,status=0,left=" + left + ",top=" + top + "");
+	if (trigger.integrationType == "FORM") {
+		trigger.form.setAttribute ("target", trigger.data.target || "MercadoPago");
+		trigger.form.submit ();
+	} else {
+		$MPC.checkout.location.href = trigger.data.url;
+	}
+	
+	$MPC.checkout.focus ();
+};
+
+
+/**
+ * Open Checkout in Modal.
+ * If browser is IE and is in QuirksMode, execute Popup
+ */
+$MPC.openCheckout.modal = function (trigger) {
+	var size = $MPC.openCheckout.size.get(trigger.data.modeData);
+
+	$MPC.__openingStart = new Date().getTime();
+	var opts = {
+		trigger: trigger,
+		width: size.width,
+		height: size.height
+	};
+
+	var siteIdRegex = new RegExp(/mla|mlb|mlc|mco|mlu|mlv|mlm|mpe/g);
+	var siteIdMatch = trigger.data.url.match(siteIdRegex);
+	var domain = null;
+	var siteId = siteIdMatch ? siteIdMatch[0] : null;
+
+	switch (siteId) {
+		case ('mla'): domain = 'mercadopago.com.ar'; break;
+		case ('mlb'): domain = 'mercadopago.com.br'; break;
+		case ('mlm'): domain = 'mercadopago.com.mx'; break;
+		case ('mco'): domain = 'mercadopago.com.co'; break;
+		case ('mlc'): domain = 'mercadopago.cl'; break;
+		case ('mlv'): domain = 'mercadopago.com.ve'; break;
+		case ('mlu'): domain = 'mercadopago.com.uy'; break;
+		case ('mpe'): domain = 'mercadopago.com.pe'; break;
+	}
+	/**
+	 * Handle the checkout url to support legacy integrations
+	 */
+	if ($MPC.isMobile()) {
+		// if the url is legacy or not does not matter in redirect scenario (moobile)
+		$MPC.__actions.loading(opts, trigger);
+		$MPC.openCheckout.redirect(trigger);
+		return;
+	} else {
+		if (domain) {
+			// if the url matches the patterns of a legacy url , replace the values to match a V2 url format
+			var url = trigger.data.url.replace(/mercadopago.com/g, domain)
+				.replace('/' + siteId, '')
+				.replace(/\/checkout\/(pay|start)/g, '/checkout/v1/modal')
+				.replace(/pref_id/g, 'preference-id');
+
+			trigger.data.url = url;
+			trigger.url = url;
+		} else {
+			// V2 Url should always come as redirect, but in desktop and mp-modal=dialog we should use modal mode
+			trigger.data.url = trigger.data.url.replace(/\/redirect/g, '/modal');
+		}
+	}
+
+	$MPC.__actions.open(opts, trigger);
+};
+
+/**
+ * MessageReceiver.
+ * Receive "message" events sent by resource loaded in iframe.
+ * 
+ * @param {Event} e
+ */
+$MPC.__msgReceiver = function (e) {
+	if (e == null) {
+		e = window.event;
+	}
+
+	if (e == null) {
+		return;
+	}
+	var regex = new RegExp ($MPC.conf.messageOrigin);
+	var match = regex.exec (e.origin);
+
+	if (match == null || match.length <= 0) {
+		return;
+	}
+	
+	var trigger = $MPC.__getTrigger (e.source);
+
+	if (typeof e.data === 'object' && typeof $MPC.__actions[e.data.type] === 'function') {
+		// Support V2 submit
+		$MPC.__actions[e.data.type] (e.data.value, trigger, true);
+		return;
+	}
+
+	var message = null;
+	try {
+		message = JSON.parse(e.data);
+	} catch (e) {
+		return;
+	}
+
+	if (typeof $MPC.__actions[message.action] == "function") {
+		$MPC.__actions[message.action] (message.data, trigger, true);
+	}
+};
+
+$MPC.__getTrigger = function (msgSource) {
+	if ($MPC.Modal.__built && $MPC.Modal.__dialog.__container.contentWindow === msgSource) {
+		return $MPC.Modal.__caller;
+	}
+	
+	for (var i = 0; i < $MPC.__integrations.iframe.length; i++) {
+		if ($MPC.__integrations.iframe[i].contentWindow === msgSource) {
+			return $MPC.__integrations.iframe[i];
+		}
+	}
+};
+
+/**
+ * Checkout related actions.
+ */
+$MPC.__actions = {};
+
+/**
+ * @action
+ * Finalize instance and call complete action if needed.
+ */
+$MPC.__actions.finalize = function (data, trigger, isMessage) {
+	$MPC.__actions.close (trigger);
+	
+	if (data != null) {
+		$MPC.__actions.complete (data, trigger, isMessage);
+	}
+};
+
+/**
+ * @action
+ * Call trigger instance associated callback method after close.
+ */
+$MPC.__actions.complete = function (data, trigger, isMessage) {
+	var onreturn = typeof trigger.onreturn == "function" ? trigger.onreturn : (typeof window[trigger.onreturn] == "function" ? window[trigger.onreturn] : null);
+
+	if (onreturn) {
+		try {
+			onreturn(data);
+		} catch (e) {
+			$MPC.__track("ERROR", "ON_RETURN", {"exception": e.message, "trigger_url": trigger.data.url, "data": data});
+		}
+	} else {
+		if (trigger.onreturn) {
+			$MPC.__track("WARNING", "ON_RETURN_NOT_FOUND", {"onreturn": trigger.onreturn, "trigger_url": trigger.data.url});
+		}
+	}
+};
+
+/**
+ * @action
+ * [V2] Initialize modal
+ */
+$MPC.__actions.v2_init = function (data, trigger, isMessage) {
+	var o = $MPC.Modal.__dialog;
+	// Set flag to reset styles if dialog is opened again
+	o.isFullscreen = true;
+
+	// Iframe styles
+	o.style.width = '100%';
+	o.style.height = '100%';
+	o.style.top = '0';
+	o.style.left = '0';
+	o.style.border = 'none';
+	o.style.backgroundColor = "transparent";
+	var container = o.__container;
+	container.style.width = '100%';
+	container.style.height = '100%';
+
+	// Hide loading and close btn, and show main iframe
+	$MPC.__actions.ready (trigger);
+	$MPC.Modal.__assets.closeButton.hide();
+};
+
+/**
+ * @action
+ * [V2] Submit
+ * Redirect to back_url on success/failure is set OR
+ * Finalize
+ */
+$MPC.__actions.submit = function (data, trigger, isMessage) {
+	var onReturnData = {};
+	for (var i = 0; i < data.length; i++) {
+		const element = data[i];
+		if (!element || !element.id) {
+			continue;
+		}
+		if (element.id.slice(0,8) === 'payment_') {
+			onReturnData['collection_' + element.id.slice(8)] = element.value;
+		} else {
+			onReturnData[element.id] = element.value;
+		}
+	}
+	if (onReturnData.back_url) {
+		document.location.href = onReturnData.back_url;
+	} else {
+		$MPC.__actions.finalize(onReturnData, trigger, isMessage);
+	}
+};
+
+
+
+/**
+ * @action
+ * Resize Checkout.
+ */
+$MPC.__actions.resize = function (resizeData, trigger, isMessage) {
+	if (!trigger) {
+		return;
+	}
+	
+	$MPC.__temp.resizedElement = trigger.integrationType == "IFRAME" ? trigger : $MPC.Modal;
+	if (trigger.integrationType == "IFRAME") {
+		$MPC.__temp.resizedElement.__size = {};
+	} else {
+		$MPC.__temp.resizedElement.__size == null && ($MPC.__temp.resizedElement.__size = {});
+	}
+	
+	if (resizeData) {
+		// Validate resizeData
+		var newSize = null;
+		if ($MPC.openCheckout.size[resizeData] != null) {
+			newSize = $MPC.openCheckout.size[resizeData];
+		} else if (resizeData.width != null && resizeData.height != null) {
+			newSize = resizeData;
+		} else {
+			var whPair = (resizeData+"").split (/[Xx,|;]/);
+			if (whPair.length == 2) {
+				newSize = {
+					width: whPair[0],
+					height: whPair[1],
+					force: (whPair[2] === "true")
+				};
+			}
+		}
+		newSize.width = parseInt ((newSize.force ? newSize.width : (trigger.data.size.width || newSize.width))+"", 10);
+		newSize.height = parseInt ((newSize.force ? newSize.height : (trigger.data.size.height || newSize.height))+"", 10);
+		
+		// If don't validate, cancel timer, reset final size and return
+		if (newSize == null || isNaN (newSize.width) || isNaN (newSize.height)) {
+			$MPC.__temp.resizedElement.__size.transition = null;
+			return;
+		}
+		
+		// If is a message call, execute ready action to show Modal if needed.
+		if (isMessage && $MPC.__temp.resizedElement.type == "Modal") {
+			$MPC.__actions.ready (trigger);
+		}
+		
+		// Validate screen size
+		$MPC.__temp.resizedElement.__size.requested = {
+				width: newSize.width,
+				height: newSize.height
+		};
+
+		if ((newSize.height + ($MPC.__temp.resizedElement.__size.margin * 2)) > window.size().height) {
+			newSize.height = Math.max ($MPC.__temp.resizedElement.__size.minHeight, (window.size().height - ($MPC.__temp.resizedElement.__size.margin * 2)));
+		}
+		
+		if ((newSize.width + ($MPC.__temp.resizedElement.__size.margin * 2)) > window.size().width) {
+			newSize.width = Math.max ($MPC.__temp.resizedElement.__size.minWidth, (window.size().width - ($MPC.__temp.resizedElement.__size.margin * 2)));
+		}
+		
+		// Get current size.
+		var currentSize = $MPC.__temp.resizedElement.type == "Modal" ? 
+			($MPC.Modal.__size.width != null && $MPC.Modal.__size.height != null ? $MPC.Modal.__size : null) :
+			{
+				width: $MPC.__temp.resizedElement.clientWidth || $MPC.__temp.resizedElement.offsetWidth,
+				height: $MPC.__temp.resizedElement.clientHeight || $MPC.__temp.resizedElement.offsetHeight
+			};
+
+		if (currentSize == null || ($MPC.__temp.resizedElement.type == "Modal" && !$MPC.Modal.__opened)) {
+			$MPC.__temp.resizedElement.__size.transition = null;
+			$MPC.__actions.resize.setWidth (newSize.width);
+			$MPC.__actions.resize.setHeight (newSize.height);
+			return;
+		}
+		
+		if ($MPC.__temp.resizedElement.__size.transition != null) {
+			return;
+		}
+		
+		$MPC.__temp.resizedElement.__size.transition = {
+			start: currentSize,
+			current: currentSize,
+			end: newSize,
+			timeStart: new Date().getTime(),
+			timeEnd: this.timeStart + $MPC.conf.resizeDuration
+		};
+	
+		(trigger.data.size.width == null || $MPC.__temp.resizedElement.type == "Modal") && requestAnimationFrame (this.resize.setWidth);
+		(trigger.data.size.height == null || $MPC.__temp.resizedElement.type == "Modal") && requestAnimationFrame (this.resize.setHeight);
+	}
+};
+
+/**
+ * Set Modal width and center it.
+ */
+$MPC.__actions.resize.setWidth = function (w) {
+	if ($MPC.__temp.resizedElement.__size.transition != null) {
+		if ($MPC.__temp.resizedElement.__size.transition.current.width == $MPC.__temp.resizedElement.__size.transition.end.width) {
+			if ($MPC.__temp.resizedElement.__size.transition.heightFinished === true) {
+				$MPC.__temp.resizedElement.__size.transition = null;
+			} else {
+				$MPC.__temp.resizedElement.__size.transition.widthFinished = true;
+			}
+			return;
+		}
+
+		var transitionTime = (w == null || w <= $MPC.__temp.resizedElement.__size.transition.timeStart) ? new Date().getTime() : w;
+		var elapsedPercentTime = (transitionTime - $MPC.__temp.resizedElement.__size.transition.timeStart) / $MPC.conf.resizeDuration;
+		
+		var widthDiff = $MPC.__temp.resizedElement.__size.transition.end.width - $MPC.__temp.resizedElement.__size.transition.start.width;
+		var widthSign = widthDiff < 0 ? -1 : 1;
+		var widthIncrement = widthDiff * elapsedPercentTime;
+		
+		w = $MPC.__temp.resizedElement.__size.transition.current.width + widthIncrement;
+		
+		if ((w * widthSign) > ($MPC.__temp.resizedElement.__size.transition.end.width * widthSign)) {
+			w = $MPC.__temp.resizedElement.__size.transition.current.width = $MPC.__temp.resizedElement.__size.transition.end.width;
+		}
+	} else if (w == null) {
+		return;
+	}
+
+	$MPC.__temp.resizedElement.__size.width = w;
+
+	if ($MPC.__temp.resizedElement.type == "Modal") {
+		$MPC.__temp.resizedElement.__size.dialogWidth = $MPC.__temp.resizedElement.__size.width + ($MPC.__temp.resizedElement.__size.padding * 2);
+		$MPC.__temp.resizedElement.__dialog.style.width = $MPC.__temp.resizedElement.__size.dialogWidth + "px";
+		$MPC.__temp.resizedElement.__dialog.__container.style.width = ($MPC.__temp.resizedElement.__size.width - (($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode) ? $MPC.__temp.resizedElement.__size.border * 2 : 0)) + "px";
+	} else {
+		$MPC.__temp.resizedElement.style.width = $MPC.__temp.resizedElement.__size.width + "px";
+	}
+
+	$MPC.__actions.center ($MPC.__temp.resizedElement);
+	
+	if ($MPC.__temp.resizedElement.__size.transition != null) {
+		requestAnimationFrame ($MPC.__actions.resize.setWidth);
+	}
+};
+
+/**
+ * Set Modal height and center it.
+ */
+$MPC.__actions.resize.setHeight = function (h) {
+	if ($MPC.__temp.resizedElement.__size.transition != null) {
+		if ($MPC.__temp.resizedElement.__size.transition.current.height == $MPC.__temp.resizedElement.__size.transition.end.height) {
+			if ($MPC.__temp.resizedElement.__size.transition.widthFinished === true) {
+				$MPC.__temp.resizedElement.__size.transition = null;
+			} else {
+				$MPC.__temp.resizedElement.__size.transition.heightFinished = true;
+			}
+			return;
+		}
+		
+		var transitionTime = (h == null || h <= $MPC.__temp.resizedElement.__size.transition.timeStart) ? new Date().getTime() : h;
+		var elapsedPercentTime = (transitionTime - $MPC.__temp.resizedElement.__size.transition.timeStart) / $MPC.conf.resizeDuration;
+		
+		var heightDiff = $MPC.__temp.resizedElement.__size.transition.end.height - $MPC.__temp.resizedElement.__size.transition.start.height;
+		var heightSign = heightDiff < 0 ? -1 : 1;
+		var heightIncrement = heightDiff * elapsedPercentTime;
+		
+		h = $MPC.__temp.resizedElement.__size.transition.current.height + heightIncrement;
+
+		if ((h * heightSign) > ($MPC.__temp.resizedElement.__size.transition.end.height * heightSign)) {
+			h = $MPC.__temp.resizedElement.__size.transition.current.height = $MPC.__temp.resizedElement.__size.transition.end.height;
+		}
+	} else if (h == null) {
+		return;
+	}
+
+	$MPC.__temp.resizedElement.__size.height = h;
+	
+	if ($MPC.__temp.resizedElement.type == "Modal") {
+		$MPC.__temp.resizedElement.__size.dialogHeight = $MPC.__temp.resizedElement.__size.height + ($MPC.__temp.resizedElement.__size.padding * 2);
+		$MPC.__temp.resizedElement.__dialog.style.height = $MPC.__temp.resizedElement.__size.dialogHeight + "px";
+		$MPC.__temp.resizedElement.__dialog.__container.style.height = ($MPC.__temp.resizedElement.__size.height - (($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode) ? $MPC.__temp.resizedElement.__size.border * 2 : 0)) + "px";
+	} else {
+		$MPC.__temp.resizedElement.style.height = $MPC.__temp.resizedElement.__size.height + "px";
+	}
+
+	$MPC.__actions.center ($MPC.__temp.resizedElement);
+
+	if ($MPC.__temp.resizedElement.__size.transition != null) {
+		requestAnimationFrame ($MPC.__actions.resize.setHeight);
+	}
+};
+
+/**
+ * Modal CheckSize
+ * 
+ */
+$MPC.__actions.resize.checkSize = function (e) {
+	if (!$MPC.Modal.__dialog.isFullscreen && $MPC.Modal.__opened && $MPC.Modal.__size.requested.height > $MPC.Modal.__size.height) {
+		$MPC.__actions.resize ($MPC.Modal.__size.requested);
+	}
+};
+
+/**
+ * @action
+ * Center Checkout in visible area.
+ */
+$MPC.__actions.center = function (trigger, isMessage) {
+	if (($MPC.Modal.__opened || $MPC.Modal.__isLoading) && !$MPC.Modal.__dialog.isFullscreen) {
+		var useScrollOffset = $MPC.__getIEVersion() == 6;
+		var pos = window.center({width:$MPC.Modal.__size.dialogWidth,height:$MPC.Modal.__size.dialogHeight}, useScrollOffset);
+		
+		var top = pos.y >= $MPC.Modal.__size.margin ? pos.y : $MPC.Modal.__size.margin; 
+		var left = pos.x >= $MPC.Modal.__size.margin ? pos.x : $MPC.Modal.__size.margin;
+
+		$MPC.Modal.__dialog.style.top = top + "px";
+		$MPC.Modal.__dialog.style.left = left + "px";
+	}
+};
+
+$MPC.__actions.requestClose = function (trigger, isMessage) {
+	if ($MPC.Modal.__opened && !$MPC.Modal.__isLoading && !$MPC.Modal.__closeRequested) {
+		if ($MPC.Modal.__dialog.__container.contentWindow.postMessage != null) {
+			$MPC.Modal.__dialog.__container.contentWindow.postMessage({"action":"requestClose"}, "*");
+			$MPC.Modal.__closeRequested = true;
+
+			$MPC.Modal.__closeTimeout = setTimeout(function (){
+				$MPC.__actions.close();
+				$MPC.__track("WARNING", "TIMEOUT_CLOSE", {"trigger_url": $MPC.Modal.__caller.data.url});
+			}, 2000);
+		}
+	}
+};
+
+/**
+ * @action
+ * Close Checkout.
+ */
+$MPC.__actions.close = function (trigger, isMessage) {
+	if ($MPC.Modal.__opened || $MPC.Modal.__isLoading) {
+		if ($MPC.Modal.__dimmer != null) {
+			$MPC.Modal.__dimmer.hide ();
+		}
+		if ($MPC.Modal.__dialog != null) {
+			$MPC.Modal.__dialog.hide ();
+			$MPC.Modal.__assets.closeButton.hide ();
+			$MPC.Modal.__assets.loading.hide ();
+
+			$MPC.Modal.__dialog.__container.src = "";
+			
+			$MPC.Modal.__opened = false;
+			$MPC.Modal.__isLoading = false;
+		}
+
+		if ($MPC.Modal.__dialog.isFullscreen) {
+			$MPC.Modal.__dialog.resetDialog();
+		}
+
+		clearTimeout ($MPC.Modal.__closeTimeout);
+		$MPC.Modal.__closeRequested = false;
+	} else if ($MPC.checkout != null) {
+		$MPC.checkout.close ();
+		$MPC.checkout = null;
+	}
+};
+
+/**
+ * @action
+ * Hide Loading and show content.
+ */
+$MPC.__actions.ready = function (trigger, isMessage) {
+	try {
+		if (isMessage === true) {
+			$MPC.__actions.resize ($MPC.Modal.__size.opening, trigger, isMessage);
+		}
+		
+		$MPC.Modal.__assets.loading.hide ();
+		
+		$MPC.Modal.__assets.closeButton.show ();
+		$MPC.Modal.__dialog.__container.show ();
+
+		if ($MPC.__openingStart) {
+			$MPC.__openingEnd = new Date().getTime();
+			$MPC.__track("TIMER", "OPEN_CHECKOUT", {"elapsed": $MPC.__openingEnd - $MPC.__openingStart, "trigger_url": trigger.data.url, "track_id": $MPC.Modal.__trackId});
+
+			$MPC.__openingStart = $MPC.__openingEnd = null;
+		}
+
+		if (!$MPC.isVisible($MPC.Modal.__dialog.__container)) {
+			$MPC.__track("ERROR", "MODAL_NOT_VISIBLE", {"trigger_url": trigger.data.url, "track_id": $MPC.Modal.__trackId});
+		};
+	} catch (e) {
+		$MPC.__track("ERROR", "MODAL_READY", {"exception": e.message, "trigger_url": trigger.data.url, "track_id": $MPC.Modal.__trackId});
+	}
+};
+
+/**
+ * Modal Window object.
+ */
+$MPC.Modal = {
+	type: "Modal",
+	__built: false,
+	__opened: false,
+	__size: {
+		border: 5,
+		padding: 0,
+		margin: 20,
+		minHeight: 350,
+		minWidth: 350,
+		controlSize: 16
+	}
+};
+
+/**
+ * Modal elements.
+ */
+$MPC.Modal.__assets = {
+	loading: (function(){
+		var l = document.createElement ("div");
+		l.style.textAlign = "center";
+		l.size = {width: 300, height: 150};
+
+		var src = 'loading.gif';
+		
+		l.img = document.createElement ("img");
+		l.appendChild (l.img);
+		
+		l.img.src = $MPC.conf.imageBasePath + src;
+		
+		l.img.size = {width: 44, height: 44};
+		l.img.width = l.img.size.width;
+		l.img.height = l.img.size.height;
+		l.img.style.margin = "30px auto 20px"; 
+		l.img.style.display = "block";
+		
+		l.welcome = document.createElement ("p");
+		l.appendChild (l.welcome);
+		l.welcome.style.fontFamily = "Arial";
+		l.welcome.style.fontSize = "13px";
+		l.welcome.style.color = "333";
+		
+		l.cancel = document.createElement ("a");
+		l.appendChild (l.cancel);
+		l.cancel.style.fontFamily = "Arial";
+		l.cancel.style.fontSize = "12px";
+		l.cancel.style.color = "#00f";
+		l.cancel.style.textDecoration = "underline";
+		l.cancel.style.cursor = "pointer";
+		
+		l.cancel.style.visibility = "hidden";
+		l.cancel.show = function () {
+			this.style.visibility = "";
+		};
+		l.cancel.hide = function () {
+			this.style.visibility = "hidden";
+		};
+		
+		l.show = function () {
+			this.init ();
+			this.style.display = '';
+			this.cancelTimer = setTimeout ("$MPC.Modal.__assets.loading.cancel.show()", 5000);
+			};
+		l.hide = function () {
+			$MPC.Modal.__isLoading = false;
+			this.style.display = 'none';
+			this.cancel.hide();
+			clearTimeout (this.cancelTimer);
+			};
+		l.init = function () {
+			if (!this.initialized) {
+				this.welcome.appendChild (document.createTextNode ($MPC._txt.get("starting")));
+				this.cancel.appendChild (document.createTextNode ($MPC._txt.get("cancel")));
+				
+				$MPC.__event.add (this.cancel, "click", function (){
+					if ($MPC.__openingStart) {
+						$MPC.__openingEnd = new Date().getTime();
+						$MPC.__track("TIMER", "CANCEL_LOADING", {"elapsed": $MPC.__openingEnd - $MPC.__openingStart, "trigger_url": $MPC.Modal.__caller.data.url, "track_id": $MPC.Modal.__trackId});
+
+						$MPC.__openingStart = $MPC.__openingEnd = null;
+					}
+					$MPC.__track("WARNING", "CANCEL_LOADING", {"trigger_url": $MPC.Modal.__caller.data.url, "track_id": $MPC.Modal.__trackId});
+					$MPC.__actions.close();
+				});
+				
+				this.initialized = true;
+			}
+		};
+		
+		return l;
+	})(),
+	closeButton: (function(){
+		var cb = document.createElement("div");
+		cb.show = function () {
+			this.init ();
+			this.style.display = '';
+			};
+		cb.hide = function () {this.style.display = 'none';};
+		
+		cb.style.width = $MPC.Modal.__size.controlSize + "px";
+		cb.style.height = $MPC.Modal.__size.controlSize + "px";
+		cb.style.fontSize = "0px";
+		cb.style.backgroundColor = "transparent";
+		cb.style.backgroundImage = "url("+$MPC.conf.imageBasePath+"close.png)";
+		cb.style.backgroundPosition = "0 0";
+		cb.style.position = "absolute";
+		cb.style.right = "7px";
+		cb.style.top = "7px";
+		cb.style.cursor = "pointer";
+		cb.style.zIndex = "250";
+		cb.innerHTML = "";
+
+		cb.mouseOver = function (e) {
+			if (e == null) {
+				e = event;
+			}
+			if (e == null) {
+				return;
+			}
+			
+			var element = e.srcElement || e.target;
+			
+			element.style.backgroundPosition = "0 -16px";
+			};
+		cb.mouseOut = function (e) {
+			if (e == null) {
+				e = event;
+			}
+			if (e == null) {
+				return;
+			}
+			
+			var element = e.srcElement || e.target;
+			
+			element.style.backgroundPosition = "0 0";
+			};
+		
+		cb.init = function () {
+			if (!this.initialized) {
+				if (!$MPC.conf.messagingEnabled || ($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode)) {
+					$MPC.__event.add (this, "click", $MPC.__actions.close);
+				} else {
+					$MPC.__event.add (this, "click", $MPC.__actions.requestClose);
+				}
+				$MPC.__event.add (this, "mouseover", this.mouseOver);
+				$MPC.__event.add (this, "mouseout", this.mouseOut);
+				
+				this.initialized = true;
+			}
+		};
+		
+		cb.initialized = false;
+		
+		return cb;
+	})()
+};
+
+/**
+ * Create Modal component
+ */
+$MPC.Modal.__build = function () {
+	// DIMMER
+	$MPC.Modal.__dimmer == null && ($MPC.Modal.__dimmer = $MPC.__components.dimmer ());
+
+	// DIALOG	
+	$MPC.Modal.__dialog == null && ($MPC.Modal.__dialog = $MPC.__components.dialog ()); 
+	
+	$MPC.Modal.__built = true;
+	return $MPC.Modal;
+};
+
+$MPC.__components = {
+		iframe:	function (name){
+			var o = document.createElement ("iframe");
+			o.id = "MP-Checkout-IFrame";
+			o.setAttribute ("name", name || "MP-Checkout-IFrame");
+			o.frameBorder = "0";
+			o.show = function () {this.style.display = '';};
+			o.hide = function () {this.style.display = 'none';};
+			
+			return o;
+		},
+		
+		dialog: function (){
+			var o = document.createElement("div");
+			o.id = "MP-Checkout-dialog";
+			o.setAttribute ("name", "MP-Checkout-dialog");
+			o.show = function () {
+				this.style.display = 'block';
+			};
+			o.hide = function () {
+				this.style.display = 'none';
+			};
+			document.getElementsByTagName ("body")[0].appendChild (o);
+
+			o.resetDialog = function() {
+				this.style.backgroundColor = "#fff";
+				this.style.border =  $MPC.Modal.__size.border + "px solid #CCCCCC";
+				this.style.MozBorderRadius = "5px 5px 5px 5px";
+				this.style.webkitBorderRadius = "5px 5px 5px 5px";
+				this.style.borderRadius = "5px 5px 5px 5px";
+				this.style.display = "none";
+				this.style.zIndex = "200";
+				if ($MPC.__getIEVersion() == 6 || $MPC.conf.quirksMode) {
+					this.style.position = "absolute";
+					$MPC.__event.add (window, "scroll", $MPC.__actions.center);
+				} else {
+					this.style.position = "fixed";
+				}
+
+				if ($MPC.Modal.__dialog && $MPC.Modal.__dialog.isFullscreen) {
+					$MPC.Modal.__dialog.isFullscreen = false;
+				}
+			}
+			o.resetDialog();
+
+			$MPC.__event.add (window, "resize", $MPC.__actions.resize.checkSize);
+			$MPC.__event.add (window, "resize", $MPC.__actions.center);
+			$MPC.__event.add(window, "message", $MPC.__msgReceiver);
+
+			
+			// CONTROL BAR
+			o.appendChild ($MPC.Modal.__assets.closeButton);
+			
+			if ($MPC.conf.messagingEnabled && !($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode)) {
+				$MPC.Modal.__assets.closeButton.hide ();
+			}
+			// END CONTROL BAR
+			
+			// IFRAME
+			o.__container = $MPC.__components.iframe ();
+			o.appendChild (o.__container);
+
+			o.__container.style.position = "absolute";
+			o.__container.style.left = $MPC.Modal.__size.padding + "px";
+			o.__container.style.bottom = $MPC.Modal.__size.padding + "px";
+			// END IFRAME
+			
+			// SET Message Receiver Event Handler
+			if ($MPC.conf.messagingEnabled && !($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode)) {
+				o.appendChild ($MPC.Modal.__assets.loading);
+			}
+
+			return o;
+		},
+		
+		dimmer: function (){
+			var o = document.createElement ("div");
+			o.show = function () {this.style.display = 'block';};
+			o.hide = function () {this.style.display = 'none';};
+			document.getElementsByTagName ("body")[0].appendChild (o);
+			
+			if ($MPC.__getIEVersion () >= 0) {
+				o.style.backgroundColor = "#000000";
+				o.style.filter = "alpha(opacity=50) !important";
+				if ($MPC.__getIEVersion () == 6 || $MPC.conf.quirksMode) {
+					o.style.width = window.size().width + "px";
+					o.style.height = (window.size().height + 12) + "px";
+					o.style.position = "absolute";
+					o.style.left = window.center(window.size(), true).x + "px";
+					o.style.top = window.center(window.size(), true).y + "px";
+					$MPC.__event.add (window, "scroll", function (){
+						o.style.left = window.center(window.size(), true).x + "px";
+						o.style.top = window.center(window.size(), true).y + "px";
+					});
+					$MPC.__event.add (window, "resize", function (){
+						o.style.width = window.size().width + "px";
+						o.style.height = (window.size().height + 12) + "px";
+						o.style.left = window.center(window.size(), true).x + "px";
+						o.style.top = window.center(window.size(), true).y + "px";
+					});
+				}
+			} else {
+				o.style.backgroundColor = "rgba(0,0,0,.5)";
+			}
+			o.style.display = "none";
+			if ($MPC.__getIEVersion() != 6 && !($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode)) {
+				o.style.width = "100%";
+				o.style.height = "100%";
+				o.style.left = "0";
+				o.style.top = "0";
+				o.style.position = "fixed";
+			}
+			o.style.zIndex = "150";
+			
+			return o;
+		}
+	};
+
+/**
+ * Open Modal with specific size and url.
+ * 
+ * @param {Object} openData: {
+ * 		trigger | url,
+ * 		width(optional),
+ * 		height(optional)
+ * }
+ * @param {Boolean} isMessage(optional)
+ */
+$MPC.__actions.open = function (openData, trigger, isMessage) {
+	$MPC.Modal.__caller = null;
+	
+	if (openData == null) {
+		return;
+	}
+	
+	openData.trigger == null && (openData.trigger = trigger);
+	
+	if (openData.trigger == null && openData.url == null) {
+		return;
+	}
+
+	if (!trigger.data.size) {
+		trigger.data.size = $MPC.openCheckout.size.dflt;
+	}
+	
+	var width = openData.width != null && !isNaN (parseInt (openData.width, 10)) ? parseInt (openData.width, 10) : $MPC.openCheckout.size.dflt.width;
+	var height = openData.height != null && !isNaN (parseInt (openData.height, 10)) ? parseInt (openData.height, 10) : $MPC.openCheckout.size.dflt.height;
+	
+	var url = openData.url;
+	
+	if (openData.trigger != null) {
+		if (openData.trigger.data != null && openData.trigger.data.url != null) {
+			url = openData.trigger.data.url;
+		}
+	}
+	
+	$MPC.Modal.__caller = openData.trigger;
+
+	$MPC.Modal.__trackId = String(Math.ceil(Math.random()*10000000))+String(new Date().getTime());
+
+    url += (url.indexOf ("?") > 0 ? "&" : "?") + "openMode=modal&trackId=" + $MPC.Modal.__trackId;
+    
+    if ($MPC.Modal.__caller.onreturn && typeof window[$MPC.Modal.__caller.onreturn] == "function") {
+		url += (url.indexOf ("?") > 0 ? "&" : "?") + "useCallback=true";
+	}
+	
+	$MPC.Modal.__build ();
+	
+	// SHOW
+	if ($MPC.conf.messagingEnabled && !($MPC.__getIEVersion () >= 0 && $MPC.conf.quirksMode)) { // With Loading
+		$MPC.__actions.loading ({width:width, height:height}, trigger);
+	} else { // Without Loading
+		$MPC.__actions.resize ({width:width, height:height}, trigger);
+
+		$MPC.Modal.__dimmer.show ();
+		$MPC.Modal.__dialog.show ();
+	}
+
+	if ($MPC.Modal.__caller.integrationType == "FORM") {
+		$MPC.Modal.__caller.form.setAttribute ("target", $MPC.Modal.__dialog.__container.getAttribute ("name"));
+		$MPC.Modal.__caller.form.submit ();
+	} else {
+		$MPC.Modal.__dialog.__container.src = url;
+	}
+
+	$MPC.Modal.__opened = true;
+};
+
+/**
+ * Close dialog (if opened) and show Loading indicator 
+ */
+$MPC.__actions.loading = function (dialogSize, trigger) {
+	if ($MPC.Modal.__isLoading) {
+		return;
+	}
+	
+	$MPC.__actions.close (trigger);
+	
+	$MPC.Modal.__size.opening = dialogSize;
+	
+	$MPC.Modal.__build ();
+	
+	$MPC.Modal.__dialog.__container.hide ();
+	$MPC.Modal.__assets.loading.show ();
+	
+	$MPC.__actions.resize ({
+		width: $MPC.Modal.__assets.loading.size.width, 
+		height: $MPC.Modal.__assets.loading.size.height,
+		force: true
+	}, trigger);
+
+	$MPC.Modal.__isLoading = true;
+
+	$MPC.Modal.__dimmer.show();
+	$MPC.Modal.__dialog.show();
+	$MPC.__actions.center ();
+};
+
+/**
+* Generic Methods
+*/
+
+
+/**
+ * Set requestAnimationFrame method for crossbrowsing compatibility.
+ */
+window.requestAnimationFrame = (function(){
+	return 	window.requestAnimationFrame       || 
+			window.webkitRequestAnimationFrame || 
+			window.mozRequestAnimationFrame    || 
+			window.oRequestAnimationFrame      || 
+			window.msRequestAnimationFrame     || 
+			function(/* function */ callback, /* DOMElement */ element){
+				window.setTimeout(callback, 1000 / 60);
+	    	};
+})();
+
+/**
+ * Manage events attachment
+ */
+$MPC.__event = {
+	/**
+	 * Bind an event to an element.
+	 * 
+	 * @param {Object} element
+	 * @param {String} eventName
+	 * @param {Function} action
+	 */
+	add: function (element, eventName, action) {
+		if (element.addEventListener) {
+			element.addEventListener (eventName, action, false);
+		} else if (element.attachEvent) {
+			element.attachEvent ("on"+eventName, action);
+		} else {
+			return false;
+		}
+		
+		return true;
+	},
+	/**
+	 * Unbind an event from an element.
+	 * 
+	 * @param {Object} element
+	 * @param {String} eventName
+	 * @param {Function} action
+	 */
+	remove: function (element, eventName, action) {
+		if (element.removeEventListener) {
+			element.removeEventListener (eventName, action, false);
+		} else if (element.detachEvent) {
+			element.detachEvent ("on"+eventName, action);
+		} else {
+			return false;
+		}
+		
+		return true;
+	}
+};
+
+/**
+ * Check element visibility
+ */
+$MPC.isVisible = function (obj)
+{
+    if (obj == document) return true;
+    
+    if (!obj) return false;
+    if (!obj.parentNode) return false;
+    if (obj.style) {
+        if (obj.style.display == 'none') return false;
+        if (obj.style.visibility == 'hidden') return false;
+    }
+    
+    //Try the computed style in a standard way
+    if (window.getComputedStyle) {
+        var style = window.getComputedStyle(obj, "");
+        if (style.display == 'none') return false;
+        if (style.visibility == 'hidden') return false;
+    }
+    
+    //Or get the computed style using IE's silly proprietary way
+    var style = obj.currentStyle;
+    if (style) {
+        if (style['display'] == 'none') return false;
+        if (style['visibility'] == 'hidden') return false;
+    }
+    
+    return $MPC.isVisible(obj.parentNode);
+};
+
+/**
+ * Check if is mobile
+ */
+$MPC.isMobile = function (){
+    var check = false;
+	(function(a){if(/(android|bb\d+|meego).+mobile|avantgo|bada\/|blackberry|blazer|compal|elaine|fennec|hiptop|iemobile|ip(hone|od)|iris|kindle|lge |maemo|midp|mmp|mobile.+firefox|netfront|opera m(ob|in)i|palm( os)?|phone|p(ixi|re)\/|plucker|pocket|psp|series(4|6)0|symbian|treo|up\.(browser|link)|vodafone|wap|windows ce|xda|xiino/i.test(a)||/1207|6310|6590|3gso|4thp|50[1-6]i|770s|802s|a wa|abac|ac(er|oo|s\-)|ai(ko|rn)|al(av|ca|co)|amoi|an(ex|ny|yw)|aptu|ar(ch|go)|as(te|us)|attw|au(di|\-m|r |s )|avan|be(ck|ll|nq)|bi(lb|rd)|bl(ac|az)|br(e|v)w|bumb|bw\-(n|u)|c55\/|capi|ccwa|cdm\-|cell|chtm|cldc|cmd\-|co(mp|nd)|craw|da(it|ll|ng)|dbte|dc\-s|devi|dica|dmob|do(c|p)o|ds(12|\-d)|el(49|ai)|em(l2|ul)|er(ic|k0)|esl8|ez([4-7]0|os|wa|ze)|fetc|fly(\-|_)|g1 u|g560|gene|gf\-5|g\-mo|go(\.w|od)|gr(ad|un)|haie|hcit|hd\-(m|p|t)|hei\-|hi(pt|ta)|hp( i|ip)|hs\-c|ht(c(\-| |_|a|g|p|s|t)|tp)|hu(aw|tc)|i\-(20|go|ma)|i230|iac( |\-|\/)|ibro|idea|ig01|ikom|im1k|inno|ipaq|iris|ja(t|v)a|jbro|jemu|jigs|kddi|keji|kgt( |\/)|klon|kpt |kwc\-|kyo(c|k)|le(no|xi)|lg( g|\/(k|l|u)|50|54|\-[a-w])|libw|lynx|m1\-w|m3ga|m50\/|ma(te|ui|xo)|mc(01|21|ca)|m\-cr|me(rc|ri)|mi(o8|oa|ts)|mmef|mo(01|02|bi|de|do|t(\-| |o|v)|zz)|mt(50|p1|v )|mwbp|mywa|n10[0-2]|n20[2-3]|n30(0|2)|n50(0|2|5)|n7(0(0|1)|10)|ne((c|m)\-|on|tf|wf|wg|wt)|nok(6|i)|nzph|o2im|op(ti|wv)|oran|owg1|p800|pan(a|d|t)|pdxg|pg(13|\-([1-8]|c))|phil|pire|pl(ay|uc)|pn\-2|po(ck|rt|se)|prox|psio|pt\-g|qa\-a|qc(07|12|21|32|60|\-[2-7]|i\-)|qtek|r380|r600|raks|rim9|ro(ve|zo)|s55\/|sa(ge|ma|mm|ms|ny|va)|sc(01|h\-|oo|p\-)|sdk\/|se(c(\-|0|1)|47|mc|nd|ri)|sgh\-|shar|sie(\-|m)|sk\-0|sl(45|id)|sm(al|ar|b3|it|t5)|so(ft|ny)|sp(01|h\-|v\-|v )|sy(01|mb)|t2(18|50)|t6(00|10|18)|ta(gt|lk)|tcl\-|tdg\-|tel(i|m)|tim\-|t\-mo|to(pl|sh)|ts(70|m\-|m3|m5)|tx\-9|up(\.b|g1|si)|utst|v400|v750|veri|vi(rg|te)|vk(40|5[0-3]|\-v)|vm40|voda|vulc|vx(52|53|60|61|70|80|81|83|85|98)|w3c(\-| )|webc|whit|wi(g |nc|nw)|wmlb|wonu|x700|yas\-|your|zeto|zte\-/i.test(a.substr(0,4))) check = true;})(navigator.userAgent||navigator.vendor||window.opera);
+	return check;
+};
+
+/**
+ * Clean left and right blank spaces.
+ */
+String.prototype.trim = function () {
+	return this.replace(/^\s+|\s+$/, '');
+};
+
+/**
+ * Search element in array.
+ */
+Array.prototype.indexOf = function (o) {
+	var returnIndex = -1;
+	
+	for (var i = 0; i < this.length; i++) {
+		if (this[i] == o) {
+			returnIndex = i;
+			break;
+		}
+	}
+	
+	return returnIndex;
+};
+
+/**
+ * Convert a collection to an array
+ */
+Array.fromCollection = function (collection) {
+	if (typeof collection.length == "undefined") {
+		return null;
+	}
+	
+	var ret = [];
+	for (var i = 0; i < collection.length; i++) {
+		ret.push (collection[i]);
+	}
+	
+	return ret;
+};
+
+/**
+ * Get current window size.
+ */
+window.size = function(){
+    var w = 0;
+    var h = 0;
+
+    if (!window.innerWidth) {
+        if (!(document.documentElement.clientWidth == 0)) {
+            w = document.documentElement.clientWidth;
+            h = document.documentElement.clientHeight;
+        }
+        else {
+            w = document.body.clientWidth;
+            h = document.body.clientHeight;
+        }
+    }
+    else {
+        w = window.innerWidth;
+        h = window.innerHeight;
+    }
+    return {width: w, height: h};
+};
+
+/**
+ * Get position to center an element of w,h size.
+ */
+window.center = function(whObj, useScrollOffset){
+	useScrollOffset = useScrollOffset === true;
+	
+	if (whObj == null || whObj.width == null || whObj.height == null) {
+		whObj = {
+			width: 0,
+			height: 0
+		};
+	}
+	
+	var _x = 0;
+	var _y = 0;
+	var offsetX = 0;
+	var offsetY = 0;
+	
+	if (useScrollOffset) {
+		if (!window.pageYOffset) {
+			if (!(document.documentElement.scrollTop == 0)) {
+				offsetY = document.documentElement.scrollTop;
+				offsetX = document.documentElement.scrollLeft;
+			}
+			else {
+				offsetY = document.body.scrollTop;
+				offsetX = document.body.scrollLeft;
+			}
+		}
+		else {
+			offsetX = window.pageXOffset;
+			offsetY = window.pageYOffset;
+		}
+	}
+
+    _x = ((this.size().width - whObj.width) / 2) + offsetX;
+    _y = ((this.size().height - whObj.height) / 2) + offsetY;
+    return {
+        x: _x,
+        y: _y
+    };
+};
+
+/**
+ * Get IExplorer current version.
+ * -1 = No Explorer
+ */
+$MPC.__getIEVersion = function () {
+	if ($MPC.IEVersion == null) {
+		var rv = -1;
+		if (navigator.appName == 'Microsoft Internet Explorer') {
+			var ua = navigator.userAgent;
+			var re = new RegExp ("MSIE ([0-9]{1,}[\.0-9]{0,})");
+			if (re.exec (ua) != null) {
+				rv = parseFloat (RegExp.$1);
+			}
+		}
+		$MPC.IEVersion = rv;
+	}
+	return $MPC.IEVersion;
+};
+
+$MPC.__getLocale = function () {
+	if ($MPC.locale == null) {
+		var locale = null;
+		
+		if (navigator) {
+			if (navigator.language) {
+				locale = navigator.language;
+			} else if ( navigator.browserLanguage ) {
+				locale = navigator.browserLanguage;
+			} else if ( navigator.systemLanguage ) {
+				locale = navigator.systemLanguage;
+			} else if (navigator.userLanguage) {
+				locale = navigator.userLanguage;
+			} else {
+				locale = "es-AR";
+			}
+			
+			var tempLocale = locale.split ("-");
+			locale = {
+				lang: tempLocale[0],
+				country: tempLocale.length > 1 ? tempLocale[1] : tempLocale[0].toUpperCase()
+			};
+		}
+		
+		$MPC.locale = locale;
+	}
+
+	return $MPC.locale;
+};
+
+
+/* CSS ***************************************************************************************************/
+
+/**
+ * CSS Definition class with or without dependency.
+ * 
+ * @param {String} dependency(optional)
+ */
+function $MPCSSOBJ (dependency) {
+	this.dependency = dependency;
+	this.attributes = {};
+}
+$MPCSSOBJ.prototype.type = "$MPCSSOBJ";
+
+/**
+ * Generate CSS code according to status and dependency value (optional).
+ * 
+ * @param {String} status
+ * @param {String} depValue(optional)
+ */
+$MPCSSOBJ.prototype.getCSS = function (status, depValue) {
+	if (status == null) {
+		status = "normal";
+	}
+	
+	var returnCSS = "";
+
+	if (this.attributes[status] != null) {
+		for (var f = 0; f < this.attributes[status].length; f++) {
+			var name = this.attributes[status][f].name;
+			var value = this.attributes[status][f].value;
+			
+			if (this.dependency != null && $MPC.styles[this.dependency] != null) {
+				if ($MPC.styles[this.dependency][depValue] == null) {
+					depValue = "DEF";
+				}
+				var values = value.split (/[,;]/);
+				if (values.length > 1) {
+					for (var v = 0; v < values.length; v++) {
+						var pair = values[v].split ("=");
+						if (pair.length != 2) {
+							continue;
+						}
+						
+						if (pair[0].trim().toLowerCase () == depValue.toLowerCase ()) {
+							value = pair[1];
+							break;
+						}
+					}
+				}
+			}
+			
+			returnCSS += name + ": " + value + ";";
+		}
+	}
+	
+	return returnCSS;
+};
+
+/**
+ * Add a CSS definition.
+ * 
+ * @param {String} attribute
+ * @param {String} status(optional)
+ * @param {String} value
+ */
+$MPCSSOBJ.prototype.add = function () {
+	var attribute = null;
+	var status = null;
+	var value = null;
+
+	if (arguments.length < 2 || arguments.length > 3) {
+		return;
+	}
+	
+	if (arguments.length == 2) {
+		attribute = arguments[0];
+		value = arguments[1];
+	}
+	
+	if (arguments.length == 3) {
+		attribute = arguments[0];
+		status = arguments[1].replace(":", "");
+		value = arguments[2];
+	}
+	
+	status == null && (status = "normal");
+	
+	this.attributes[status] == null && (this.attributes[status] = []);
+	
+	this.attributes[status].push (new $MPCSSATTR (attribute, value));
+
+	return this;
+};
+
+/**
+ * CSS attribute class.
+ * 
+ * @param {String} name
+ * @param {String} value
+ */
+function $MPCSSATTR (name, value) {
+	this.name = name;
+	this.value = value;
+}
+$MPCSSATTR.prototype.type = "$MPCSSATTR";
+
+/**
+ * 
+ * Insert CSS generated definitions into user HTML DOM.
+ * 
+ * @param {String} groupType
+ * @param {String} className
+ * @param {String} styleBody
+ */
+$MPC.__addCSS = function (groupType, className, styleBody) {
+	if (document.styleSheets != null) {
+		$MPC.__styleSheets == null && ($MPC.__styleSheets = {});
+		
+		if ($MPC.__styleSheets[groupType] == null) {
+			var mpStyleSheet = document.createElement('style');
+			mpStyleSheet.type = 'text/css';
+			document.getElementsByTagName("head")[0].appendChild(mpStyleSheet);
+			
+			$MPC.__styleSheets[groupType] = mpStyleSheet.sheet || mpStyleSheet.styleSheet;
+		}
+
+		$MPC.__styleSheets[groupType].addRule ? $MPC.__styleSheets[groupType].addRule("." + className, styleBody) :$MPC.__styleSheets[groupType].insertRule("." + className + " {" + styleBody + "} ", $MPC.__styleSheets[groupType].cssRules.length);
+	}
+};
+
+/**
+* START CSS Definitions.
+*/
+
+/**
+ * CSS Visual Group Configuration class.
+ * 
+ * @param {String} groupType
+ * @param {Array} elements
+ */
+function $MPVG (groupType, elements) {
+	this.groupType = groupType;
+	this.elements = elements;
+}
+
+/**
+ * Get value from className for current Group.
+ * 
+ * @param {String} className
+ */
+$MPVG.prototype.getData = function (className) {
+	if (this.elements == null || this.elements.length <= 0) {
+		return "";
+	}
+	
+	var regex = new RegExp ("-(" + this.elements.join ("|") + ")-", "g");
+	
+	var match = regex.exec ("-" + className.toLowerCase() + "-");
+	return ((match != null && match.length > 0) ? match[1] : "");
+};
+
+/**
+ * Group definitions with type and associated classes.
+ * To add a group, must add a definition here.
+ */
+$MPC.vGroups = {
+		color: new $MPVG ("base", ["blue", "orange", "red", "green", "lightblue", "grey"]),
+		size: new $MPVG ("style", ["l", "m", "s"]),
+		font: new $MPVG ("style", ["ar", "ge", "tr"]),
+		shape: new $MPVG ("style", ["sq", "rn", "ov"]),
+		logo: new $MPVG ("extra", ["arall", "aron", "brall", "bron", "mxall", "mxon", "veall", "veon", "coall", "coon","clall", "clon"])
+	};
+
+/**
+ * Groups where CSS definitions will be created. 
+ * To add a group, must add a definition here.
+ */
+$MPC.styles = {
+	base: {},
+	color: {},
+	size: {},
+	font: {},
+	shape: {},
+	logo: {},
+	dflt: "base" // Default style for all buttons
+};
+
+/**
+ * Styles definition:
+ *
+ * $MPC.styles.[GROUP].common = new $MPCSSOBJ ();
+ *		-> Common styles for group
+ * $MPC.styles.[GROUP].[STYLE_NAME] = new $MPCSSOBJ ([DEPENDANT_GROUP]); 
+ *		-> Can have values for attributes depending on another definition
+ *		-> Must have only dependant GROUP
+ * $MPC.styles.[GROUP].[STYLE_NAME].add ("[CSS_ATTRIBUTE]", "[VALUE]");
+ * $MPC.styles.[GROUP].[STYLE_NAME].add ("[CSS_ATTRIBUTE]", "[STATUS(:hover, :link, :active, etc.)]", "[VALUE]");
+ * $MPC.styles.[GROUP].[STYLE_NAME].add ("[CSS_ATTRIBUTE]", "[DEP]=[VALUE],[DEP]=[VALUE],[DEP]=[VALUE]...DEF=[DEFAULT_VALUE]");
+ *		-> According to DEPENDANT_GROUP, can specify different VALUE for each DEP (STYLE_NAME in DEPENDANT_GROUP)
+ */
+
+////// BASE
+$MPC.styles.base.common = new $MPCSSOBJ ()
+	.add ("cursor", "pointer")
+	.add ("display", "inline-block")
+	.add ("margin", "10px")
+	.add ("font-weight", "normal")
+	.add ("text-decoration", "none")
+	.add ("text-decoration", ":hover", "none")
+	.add ("font-size", "20px")
+	.add ("line-height", "40px")
+	.add ("padding", "0px 20px");
+
+////// COLOR
+$MPC.styles.color.common = new $MPCSSOBJ ("size")
+	.add ("color", ":link", "#fff")
+	.add ("background-repeat", "repeat-x")
+	.add ("background-position", "0 0")
+	.add ("background-position", ":hover", "S=0 -470px,M=0 -300px,L=0 -80px,DEF=0 -80px")
+	.add ("background-position", ":active", "S=0 -520px,M=0 -360px,L=0 -160px,DEF=0 -120px");
+
+////// blue
+$MPC.styles.color.blue = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-blue.png)")
+	.add ("background-color", "#28536F")
+	.add ("background-color", ":hover", "#2F719D")
+	.add ("background-color", ":active", "#326689")
+	.add ("color", "#fff")
+	.add ("color", ":visited", "#fff")
+	.add ("color", ":hover", "#fff")
+	.add ("color", ":active", "#fff")
+	.add ("border", "1px solid #293E75")
+	.add ("text-shadow", "1px 1px #293E75");
+
+////// orange
+$MPC.styles.color.orange = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-orange.png)")
+	.add ("background-color", "#F27126")
+	.add ("color", "#fff")
+	.add ("color", ":visited", "#fff")
+	.add ("color", ":hover", "#fff")
+	.add ("color", ":active", "#fff")
+	.add ("border", "1px solid #F67C41")
+	.add ("text-shadow", "1px 1px #F67C41");	
+
+////// red
+$MPC.styles.color.red = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-red.png)")
+	.add ("background-color", "#C12020")
+	.add ("color", "#fff")
+	.add ("color", ":hover", "#fff")
+	.add ("color", ":visited", "#fff")
+	.add ("color", ":active", "#fff")
+	.add ("border", "1px solid #CC1B17")
+	.add ("text-shadow", "1px 1px #CC1B17");	
+
+////// green
+$MPC.styles.color.green = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-green.png)")
+	.add ("background-color", "#077574")
+	.add ("color", "#fff")
+	.add ("color", ":visited", "#fff")
+	.add ("color", ":hover", "#fff")
+	.add ("color", ":active", "#fff")
+	.add ("border", "1px solid #0B898B")
+	.add ("text-shadow", "1px 1px #0B898B");	
+
+////// lightblue
+$MPC.styles.color.lightblue = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-lightblue.png)")
+	.add ("background-color", "#B8D2EB")
+	.add ("background-color", ":hover", "#D9E7F4")
+	.add ("background-color", ":active", "#E8F8FD")
+	.add ("color", "#215181")
+	.add ("color", ":link", "#215181")
+	.add ("color", ":visited", "#215181")
+	.add ("color", ":hover", "#215181")
+	.add ("color", ":active", "#215181")
+	.add ("border", "1px solid #8DB7E9");
+
+////// grey
+$MPC.styles.color.grey = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-grey.png)")
+	.add ("background-color", "#C5C5C5")
+	.add ("color", "#333333")
+	.add ("color", ":link", "#333333")
+	.add ("color", ":visited", "#333333")
+	.add ("color", ":hover", "#333333")
+	.add ("color", ":active", "#333333")
+	.add ("border", "1px solid #ADADAD");
+
+////// SIZE
+$MPC.styles.size.l = new $MPCSSOBJ ()
+	.add ("font-size", "20px")
+	.add ("line-height", "40px")
+	.add ("padding", "0px 20px");
+
+$MPC.styles.size.m = new $MPCSSOBJ ()
+	.add ("font-size", "17px")
+	.add ("line-height", "30px")
+	.add ("padding", "0px 17px");
+
+$MPC.styles.size.s = new $MPCSSOBJ ()
+	.add ("font-size", "14px")
+	.add ("line-height", "25px")
+	.add ("padding", "0px 14px");
+
+////// FONT
+$MPC.styles.font.ar = new $MPCSSOBJ ()
+	.add ("font-family", "Arial");
+
+$MPC.styles.font.tr = new $MPCSSOBJ ()
+	.add ("font-family", "Trebuchet MS");
+
+$MPC.styles.font.ge = new $MPCSSOBJ ()
+	.add ("font-family", "Georgia");
+
+////// SHAPE
+$MPC.styles.shape.sq = new $MPCSSOBJ ()
+	.add ("border-radius", "0px")
+	.add ("-moz-border-radius", "0px")
+	.add ("-webkit-border-radius", "0px");
+
+$MPC.styles.shape.rn = new $MPCSSOBJ ("size")
+	.add ("border-radius", "S=3px,M=5px,L=7px,DEF=7px")
+	.add ("-moz-border-radius", "S=3px,M=5px,L=7px,DEF=7px")
+	.add ("-webkit-border-radius", "S=3px,M=5px,L=7px,DEF=7px");
+
+$MPC.styles.shape.ov = new $MPCSSOBJ ("size")
+	.add ("border-radius", "S=12px,M=15px,L=20px,DEF=7px")
+	.add ("-moz-border-radius", "S=13px,M=15px,L=20px,DEF=7px")
+	.add ("-webkit-border-radius", "S=13px,M=15px,L=20px,DEF=7px");
+
+////// LOGO
+$MPC.styles.logo.common = new $MPCSSOBJ ()
+	.add ("margin", "-10px auto 0")
+	.add ("display", "block");
+
+$MPC.styles.logo.arall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "165px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.aron = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "133px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.brall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-br.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "165px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.bron = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-br.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "125px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.mxall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-mex.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "178px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.mxon = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-mex.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "114px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.veall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-ven.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "156px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.veon = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-ven.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "98px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.coall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-co.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "134px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.coon = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-co.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "114px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.clall = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-cl.png)")
+	.add ("background-position", "0 -29px")
+	.add ("width", "114px")
+	.add ("height", "23px");
+
+$MPC.styles.logo.clon = new $MPCSSOBJ ()
+	.add ("background", "url(" + $MPC.conf.imageBasePath + "MP-payButton-logos-cl.png)")
+	.add ("background-position", "0 -3px")
+	.add ("width", "275px")
+	.add ("height", "23px");
+
+/**
+ * END CSS Definitions.
+ */
+
+/**
+ * Language specific texts
+ */
+
+$MPC._txt = {
+	dflt: {
+		starting: "Iniciando pago con MercadoPago",
+		cancel: "Cancelar"
+	},
+	es: {
+		starting: "Iniciando pago con MercadoPago"
+	},
+	pt: {
+		starting: "Inicializando o pagamento com MercadoPago"
+	}
+};
+
+$MPC._txt.get = function (textId, lang) {
+	lang = lang == null ? $MPC.__getLocale().lang : lang;
+	
+	return this[lang] != null && this[lang][textId] != null ? this[lang][textId] : (this.dflt[textId] != null ? this.dflt[textId] : "");
+};
+
+/**
+ * DejaVu Tracker
+ */
+$MPC.__track = function (type, event, data) {
+	// if ($MPC.conf.trackEnabled !== true) {
+	// 	return;
+	// }
+
+	// data || (data = {});
+	
+	// data.type = type;
+	// data.event = event;
+	// data.id = $MPC.sessionId;
+	// data.app = "MPC";
+	// data.version = this.version;
+	// data.host = document.location.hostname;
+	// data.location = escape(document.location.protocol + "\/\/" + document.location.hostname + document.location.port + document.location.pathname);
+	
+	// var pairs = [];
+	
+	// for (var key in data) {
+	// 	pairs.push (key + "=" + data[key]);
+	// }
+	
+	// new Image().src = $MPC.conf.trackPath + "?" + pairs.join ("&");
+};
+
+/**
+ * Render execution.
+ */
+$MPC ();
+// compatibility
+$MPBR = $MPC;
+$MPBR.doVisual = $MPC.__doVisual;

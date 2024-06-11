@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contacto</title>
+    <link rel="stylesheet" href="estilo.css">
+</head>
+
+<body class="dancing-script-">
+    <header id="arriba">
+        <nav class="navegador">
+            <ul class="menusuperior">
+                <li> <a href="index.html"> Home</a></li>
+                <li> <a href="./personajes.html">Personajes</a></li>
+                <li><a href="./peliculas.html">Peliculas</a></li>
+                <li><a href="./libros.html">libros</a></li>
+
+            </ul>
+            <div><a href="#Pie">ir abajo</a></div>
+
+        </nav>
+    </header>
+    <h2>Contacto</h2>
+    <section class="contacto">
+        <form action="" method="post" class="formulario">
+            <fieldset class="fieldset">
+                <legend class="legend">Informacion de contacto</legend>
+
+                <div class="form_grup">
+                    <label for="nombre" class="label">Nombre</label>
+                    <input type="text" class="input" name="nombre" id="nombre" required>
+                </div>
+                <div class="form_grup">
+                    <label for="apellido" class="label">Apellido</label>
+                    <input type="text" class="input" name="apellido" id="apellido" required>
+                </div>
+                <div class="form_grup">
+                    <label for="clave" class="label">Contraseña</label>
+                    <input type="password" class="input" name="clave" id="clave" required>
+                </div>
+                <div class="form_grup">
+                    <label for="edad" class="label">Edad</label>
+                    <input type="number" class="input" name="edad" id="edad" min="18" required>
+                </div>
+                <div class="form_grup">
+                    <label for="mensaje" class="label">Mensaje</label>
+                    <textarea name="mensaje" id="mensaje" rows="5" cols="20"></textarea>
+                </div>
+
+                <div class="form_grup">
+                    <label for="sitioweb" class="label">Sitio Web</label>
+                    <input type="url" class="input" name="sitioweb" pattern="https?://.+"
+                        title="Por favor, ingrrese una URL valida">
+                </div>
+
+                <div class="form_grup">
+                    <label for="pais" class="label">Pais</label>
+                    <select name="Pais" id="">
+                        <option value="A">Argentina</option>
+                        <option value="B">Brasil</option>
+                        <option value="Bo">Bolivia</option>
+                        <option value="C">Chile</option>
+                    </select>
+                </div>
+                <div class="form_grup">
+                    <p for="colores"> Selecciona tu color</p>
+
+                    <input type="radio" name="color" value="rojo">
+                    <label for="rojo" >Rojo</label>
+                    <input type="radio" name="color" value="azul">
+                    <label for="azul" >Azul</label>
+                    <input type="radio" name="color" value="amarillo">
+                    <label for="amarillo" >Amarillo</label>
+                </div>
+
+                <div class="form_grup">
+                    <p for="Personajes"> Selecciona personajes favoritos</p>
+                    <input type="checkbox">
+                    <label for="Harry-Potter">Harry Potter</label>
+                    <input type="checkbox">
+                    <label for="germioni"> Germioni</label>
+                    <input type="checkbox">
+                    <label for="ron">Ron</label>
+                    <input type="checkbox">
+                    <label for="Draco">Draco</label>
+
+                </div>
+
+
+            </fieldset>
+            <input type="submit" class="submit-enviar" value="Enviar formulario">
+
+
+        </form>
+    </section>
+
+</body>
+
+</html>
